@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block content %}
+    {% if user %}
+        <div class="card">
+            <h2>欢迎回来，{{ user["username"] }}！</h2>
+            <h3>个人信息</h3>
+            <ul class="info-list">
+                <li><strong>用户名：</strong>{{ user["username"] }}</li>
+                <li><strong>邮箱：</strong>{{ user["email"] }}</li>
+                <li><strong>手机号：</strong>{{ user["phone"][:3] }}****{{ user["phone"][-4:] }}</li>
+                <li><strong>角色：</strong>{{ user["role"] }}</li>
+                {% if user["role"] == "admin" %}
+                    <li><strong>余额：</strong>{{ user["balance"] }}</li>
+                {% endif %}
+            </ul>
+        </div>
+
+        <div class="card">
+            <h3>修改密码</h3>
+            {% if pw_success %}
+                <div class="success-msg">{{ pw_success }}</div>
+            {% endif %}
+            {% if pw_error %}
+                <div class="error-msg">{{ pw_error }}</div>
+            {% endif %}
+            <form method="post" action="/change-password" class="login-form">
+                <div class="form-group">
+                    <label for="old_password">当前密码</label>
+                    <input type="password" id="old_password" name="old_password" placeholder="请输入当前密码" required>
+                </div>
+                <div class="form-group">
+                    <label for="new_password">新密码</label>
+                    <input type="password" id="new_password" name="new_password" placeholder="请输入新密码" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirm_password">确认新密码</label>
+                    <input type="password" id="confirm_password" name="confirm_password" placeholder="请再次输入新密码" required>
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">修改密码</button>
+            </form>
+        </div>
+
+        <div style="text-align: center;">
+            <a href="/logout" class="btn btn-danger">退出登录</a>
+        </div>
+    {% else %}
+        <div class="card">
+            <h2>请先登录</h2>
+            <p>您尚未登录，请登录后查看用户信息。</p>
+            <a href="/login" class="btn btn-primary">前往登录</a>
+        </div>
+    {% endif %}
+{% endblock %}
