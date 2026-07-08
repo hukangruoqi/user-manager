@@ -1,0 +1,5 @@
+openclaw-workspace-state.json
+memory/
+*.pyc
+__pycache__/
+reports/
