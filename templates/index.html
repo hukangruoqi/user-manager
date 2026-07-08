@@ -9,11 +9,48 @@
                 <li><strong>用户名：</strong>{{ user["username"] }}</li>
                 <li><strong>邮箱：</strong>{{ user["email"] }}</li>
                 <li><strong>手机号：</strong>{{ user["phone"][:3] }}****{{ user["phone"][-4:] }}</li>
-                <li><strong>角色：</strong>{{ user["role"] }}</li>
-                {% if user["role"] == "admin" %}
-                    <li><strong>余额：</strong>{{ user["balance"] }}</li>
-                {% endif %}
             </ul>
+        </div>
+
+        <!-- 搜索功能 -->
+        <div class="card">
+            <h3>搜索用户</h3>
+            <form method="get" action="/" class="search-form">
+                <div class="form-group search-group">
+                    <input type="text" id="keyword" name="keyword" placeholder="输入用户名或邮箱搜索..." value="{{ keyword or '' }}">
+                    <button type="submit" class="btn btn-primary">搜索</button>
+                </div>
+            </form>
+
+            {% if keyword is defined and keyword %}
+                <div class="search-results">
+                    <h4>搜索结果：关键词 "{{ keyword }}"</h4>
+                    {% if results %}
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>用户名</th>
+                                    <th>邮箱</th>
+                                    <th>手机</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for r in results %}
+                                <tr>
+                                    <td>{{ r["id"] }}</td>
+                                    <td>{{ r["username"] }}</td>
+                                    <td>{{ r["email"] }}</td>
+                                    <td>{{ r["phone"] }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    {% else %}
+                        <p class="no-result">无搜索结果</p>
+                    {% endif %}
+                </div>
+            {% endif %}
         </div>
 
         <div class="card">
