@@ -1,11 +1,13 @@
 import sqlite3
 import os
 import re
-from flask import Flask, render_template, request, redirect, session
+import uuid
+from flask import Flask, render_template, request, redirect, session, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = "dev-key-2025"
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
 
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_PATH = os.path.join(DB_DIR, "users.db")
@@ -183,6 +185,72 @@ def change_password():
 
     user = get_user_by_username(username)
     return render_template("index.html", user=user, pw_success="密码修改成功")
+
+
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "uploads")
+UPLOAD_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+
+
+def _validate_image(file_storage):
+    """校验文件后缀名和文件头魔数，合法图片返回 True，否则返回 False"""
+    # 1. 校验文件后缀
+    filename = file_storage.filename
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in UPLOAD_EXTENSIONS:
+        return False
+
+    # 2. 校验文件头魔数（magic bytes）
+    magic = file_storage.read(12)  # WebP 需要最多 12 字节
+    file_storage.seek(0)  # 重置文件指针，不影响后续 save()
+
+    # PNG: 89 50 4E 47 0D 0A 1A 0A
+    if ext == '.png' and magic[:8] == b'\x89PNG\r\n\x1a\n':
+        return True
+    # JPEG: FF D8 FF
+    if ext in ('.jpg', '.jpeg') and magic[:3] == b'\xff\xd8\xff':
+        return True
+    # GIF: GIF87a 或 GIF89a
+    if ext == '.gif' and magic[:6] in (b'GIF87a', b'GIF89a'):
+        return True
+    # WebP: RIFF .... WEBP
+    if ext == '.webp' and magic[:4] == b'RIFF' and magic[8:12] == b'WEBP':
+        return True
+
+    return False
+
+
+@app.route("/upload", methods=["GET", "POST"])
+def upload():
+    username = session.get("username")
+    if not username:
+        return redirect("/login")
+
+    error = None
+    file_url = None
+
+    if request.method == "POST":
+        file = request.files.get("file")
+        if not file or file.filename == "":
+            error = "请选择一个文件"
+        elif not _validate_image(file):
+            error = "只允许上传 PNG、JPG/JPEG、GIF、WebP 格式的图片文件"
+        else:
+            try:
+                ext = os.path.splitext(file.filename)[1].lower()
+                new_filename = uuid.uuid4().hex + ext
+                os.makedirs(UPLOAD_DIR, exist_ok=True)
+                save_path = os.path.join(UPLOAD_DIR, new_filename)
+                file.save(save_path)
+                file_url = url_for("static", filename=f"uploads/{new_filename}")
+            except Exception:
+                error = "文件上传失败，请重试"
+
+    return render_template("upload.html", error=error, file_url=file_url)
+
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return render_template("upload.html", error="文件大小超过限制（最大 16MB）"), 413
 
 
 @app.route("/logout")
