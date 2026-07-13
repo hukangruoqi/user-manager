@@ -6,7 +6,7 @@ from flask import Flask, render_template, request, redirect, session, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = "dev-key-2025"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(32).hex())
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
 
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -24,21 +24,31 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             email TEXT,
-            phone TEXT
+            phone TEXT,
+            balance INTEGER
         )
     """)
+    # 兼容旧数据库：若 balance 列不存在则添加
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN balance INTEGER")
+    except sqlite3.OperationalError:
+        pass
+
     # 插入默认用户（密码已哈希），INSERT OR IGNORE 防止重复
     admin_pw = generate_password_hash("admin123")
     alice_pw = generate_password_hash("alice2025")
-    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)",
-              ('admin', admin_pw, 'admin@example.com', '13800138000'))
-    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)",
-              ('alice', alice_pw, 'alice@example.com', '13900139001'))
+    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone, balance) VALUES (?, ?, ?, ?, ?)",
+              ('admin', admin_pw, 'admin@example.com', '13800138000', 1000))
+    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone, balance) VALUES (?, ?, ?, ?, ?)",
+              ('alice', alice_pw, 'alice@example.com', '13900139001', 100))
     # 迁移：若旧数据库中密码还是明文，则更新为哈希值
     c.execute("UPDATE users SET password = ? WHERE username = ? AND password = ?",
               (admin_pw, 'admin', 'admin123'))
     c.execute("UPDATE users SET password = ? WHERE username = ? AND password = ?",
               (alice_pw, 'alice', 'alice2025'))
+    # 兼容旧数据库：若 balance 为 NULL（从旧表迁移过来的数据），设置初始余额
+    c.execute("UPDATE users SET balance = 1000 WHERE username = 'admin' AND balance IS NULL")
+    c.execute("UPDATE users SET balance = 100 WHERE username = 'alice' AND balance IS NULL")
     conn.commit()
     conn.close()
     print("[init_db] 数据库初始化完成")
@@ -60,17 +70,31 @@ def get_user_by_username(username):
 
 
 def search_users(keyword):
-    """根据关键词搜索用户（参数化查询，防止 SQL 注入）"""
+    """根据关键词搜索用户（参数化查询，防止 SQL 注入，仅返回脱敏数据）"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    sql = "SELECT * FROM users WHERE username LIKE ? OR email LIKE ?"
+    sql = "SELECT id, username, email, phone FROM users WHERE username LIKE ? OR email LIKE ?"
     like_pattern = f'%{keyword}%'
     print(f"[SQL] {sql} 参数: like='%{keyword}%'")
     c.execute(sql, (like_pattern, like_pattern))
     rows = c.fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        d = dict(r)
+        # 手机号脱敏
+        if d.get("phone") and len(d["phone"]) == 11:
+            d["phone"] = d["phone"][:3] + "****" + d["phone"][-4:]
+        # 邮箱脱敏
+        if d.get("email") and "@" in d["email"]:
+            parts = d["email"].split("@")
+            if len(parts[0]) >= 2:
+                d["email"] = parts[0][0] + "***" + parts[0][-1] + "@" + parts[1]
+            else:
+                d["email"] = parts[0][0] + "***@" + parts[1]
+        result.append(d)
+    return result
 
 
 @app.route("/")
@@ -126,9 +150,9 @@ def register():
                 conn = sqlite3.connect(DB_PATH)
                 c = conn.cursor()
                 hashed_pw = generate_password_hash(password)
-                sql = "INSERT INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)"
+                sql = "INSERT INTO users (username, password, email, phone, balance) VALUES (?, ?, ?, ?, ?)"
                 print(f"[SQL] {sql} 参数: username='{username}', email='{email}', phone='{phone}'")
-                c.execute(sql, (username, hashed_pw, email, phone))
+                c.execute(sql, (username, hashed_pw, email, phone, 0))
                 conn.commit()
                 conn.close()
                 return redirect("/login?success=注册成功，请登录")
@@ -185,6 +209,73 @@ def change_password():
 
     user = get_user_by_username(username)
     return render_template("index.html", user=user, pw_success="密码修改成功")
+
+
+@app.route("/profile")
+def profile():
+    username = session.get("username")
+    if not username:
+        return redirect("/login")
+
+    user_id = request.args.get("user_id")
+    if not user_id:
+        return redirect("/")
+
+    current_user = get_user_by_username(username)
+    # 只能查看自己的个人中心
+    if str(current_user["id"]) != str(user_id):
+        return render_template("profile.html", error="无权访问其他用户的个人信息")
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return render_template("profile.html", error="用户不存在")
+
+    user = dict(row)
+    return render_template("profile.html", user=user)
+
+
+@app.route("/recharge", methods=["POST"])
+def recharge():
+    username = session.get("username")
+    if not username:
+        return redirect("/login")
+
+    user_id = request.form.get("user_id")
+    amount_str = request.form.get("amount", "0")
+
+    current_user = get_user_by_username(username)
+    if not current_user:
+        return redirect("/login")
+
+    # 只能给自己充值
+    if str(current_user["id"]) != str(user_id):
+        return render_template("profile.html", user=current_user, error="只能给自己充值")
+
+    # 校验金额合法性
+    try:
+        amount = int(amount_str)
+    except (ValueError, TypeError):
+        return render_template("profile.html", user=current_user, error="金额必须为整数")
+
+    if amount <= 0:
+        return render_template("profile.html", user=current_user, error="充值金额必须为正整数")
+
+    if amount > 1000000:
+        return render_template("profile.html", user=current_user, error="单次充值金额不能超过100万元")
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE users SET balance = balance + ? WHERE id = ?", (amount, user_id))
+    conn.commit()
+    conn.close()
+
+    return redirect(f"/profile?user_id={user_id}")
 
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "uploads")

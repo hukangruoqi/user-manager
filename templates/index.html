@@ -11,6 +11,7 @@
                 <li><strong>手机号：</strong>{{ user["phone"][:3] }}****{{ user["phone"][-4:] }}</li>
             </ul>
             <div style="margin-top: 15px;">
+                <a href="/profile?user_id={{ user['id'] }}" class="btn btn-primary">个人中心</a>
                 <a href="/upload" class="btn btn-primary">上传头像</a>
             </div>
         </div>
@@ -44,7 +45,7 @@
                                     <td>{{ r["id"] }}</td>
                                     <td>{{ r["username"] }}</td>
                                     <td>{{ r["email"] }}</td>
-                                    <td>{{ r["phone"] }}</td>
+                                    <td>{{ r["phone"] }}</td>                <!-- 数据层已脱敏处理 -->
                                 </tr>
                                 {% endfor %}
                             </tbody>
