@@ -13,8 +13,15 @@
             <div style="margin-top: 15px;">
                 <a href="/profile?user_id={{ user['id'] }}" class="btn btn-primary">个人中心</a>
                 <a href="/upload" class="btn btn-primary">上传头像</a>
+                <a href="/page?name=help" class="btn btn-primary">帮助中心</a>
             </div>
         </div>
+
+        {% if page_content %}
+        <div class="card page-content">
+            {{ page_content | safe }}
+        </div>
+        {% endif %}
 
         <!-- 搜索功能 -->
         <div class="card">
@@ -57,32 +64,35 @@
             {% endif %}
         </div>
 
+        <!-- URL 抓取功能 -->
         <div class="card">
-            <h3>修改密码</h3>
-            {% if pw_success %}
-                <div class="success-msg">{{ pw_success }}</div>
-            {% endif %}
-            {% if pw_error %}
-                <div class="error-msg">{{ pw_error }}</div>
-            {% endif %}
-            <form method="post" action="/change-password" class="login-form">
-                <div class="form-group">
-                    <label for="old_password">当前密码</label>
-                    <input type="password" id="old_password" name="old_password" placeholder="请输入当前密码" required>
+            <h3>URL 抓取</h3>
+            <form method="post" action="/fetch-url" class="search-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-group search-group">
+                    <input type="text" id="url" name="url" placeholder="输入 URL（支持 http/https/file 等协议）..." value="{{ fetch_url or '' }}">
+                    <button type="submit" class="btn btn-primary">抓取</button>
                 </div>
-                <div class="form-group">
-                    <label for="new_password">新密码</label>
-                    <input type="password" id="new_password" name="new_password" placeholder="请输入新密码" required>
-                </div>
-                <div class="form-group">
-                    <label for="confirm_password">确认新密码</label>
-                    <input type="password" id="confirm_password" name="confirm_password" placeholder="请再次输入新密码" required>
-                </div>
-                <button type="submit" class="btn btn-primary btn-block">修改密码</button>
             </form>
+
+            {% if fetch_status is defined and fetch_status %}
+            <div class="fetch-result">
+                <h4>抓取结果</h4>
+                <p><strong>URL：</strong>{{ fetch_url }}</p>
+                <p><strong>状态码：</strong><span class="status-badge">{{ fetch_status }}</span></p>
+                <div class="fetch-content">
+                    <pre>{{ fetch_content }}</pre>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if fetch_error %}
+            <div class="error-msg">{{ fetch_error }}</div>
+            {% endif %}
         </div>
 
         <div style="text-align: center;">
+            <a href="/profile?user_id={{ user['id'] }}" class="btn btn-primary">个人中心</a>
             <a href="/logout" class="btn btn-danger">退出登录</a>
         </div>
     {% else %}
@@ -91,5 +101,11 @@
             <p>您尚未登录，请登录后查看用户信息。</p>
             <a href="/login" class="btn btn-primary">前往登录</a>
         </div>
+    {% endif %}
+
+    {% if page_content %}
+    <div class="card page-content">
+        {{ page_content | safe }}
+    </div>
     {% endif %}
 {% endblock %}

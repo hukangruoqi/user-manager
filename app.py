@@ -2,12 +2,30 @@ import sqlite3
 import os
 import re
 import uuid
+import urllib.request
+import urllib.error
+import socket
+from urllib.parse import urlparse
+from ipaddress import ip_address, ip_network
 from flask import Flask, render_template, request, redirect, session, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_wtf.csrf import CSRFProtect
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", os.urandom(32).hex())
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB
+app.config['WTF_CSRF_ENABLED'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+csrf = CSRFProtect(app)
+
+
+@app.errorhandler(400)
+def csrf_error_handler(error):
+    """CSRF 验证失败时返回友好错误页面"""
+    if "csrf" in str(error).lower():
+        return render_template("error.html", message="请求已过期或来源非法，请刷新页面后重试"), 400
+    return render_template("error.html", message="错误的请求"), 400
+
 
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DB_PATH = os.path.join(DB_DIR, "users.db")
@@ -180,35 +198,23 @@ def change_password():
     if not username:
         return redirect("/login")
 
-    old_pw = request.form.get("old_password", "")
-    new_pw = request.form.get("new_password", "")
-    confirm_pw = request.form.get("confirm_password", "")
-    user = get_user_by_username(username)
+    target_username = request.form.get("username", "")
+    new_password = request.form.get("new_password", "")
+    confirm_password = request.form.get("confirm_password", "")
 
-    if not user:
-        return redirect("/")
-
-    # 使用 check_password_hash 比对旧密码
-    if not check_password_hash(user["password"], old_pw):
-        return render_template("index.html", user=user, pw_error="旧密码错误")
-
-    if new_pw != confirm_pw:
-        return render_template("index.html", user=user, pw_error="两次新密码输入不一致")
-
-    if len(new_pw) < 6:
-        return render_template("index.html", user=user, pw_error="新密码长度至少6位")
+    if new_password != confirm_password:
+        return redirect("/profile")
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    hashed_pw = generate_password_hash(new_pw)
+    hashed_pw = generate_password_hash(new_password)
     sql = "UPDATE users SET password = ? WHERE username = ?"
-    print(f"[SQL] {sql} 参数: username='{username}'")
-    c.execute(sql, (hashed_pw, username))
+    print(f"[SQL] {sql} 参数: username='{target_username}'")
+    c.execute(sql, (hashed_pw, target_username))
     conn.commit()
     conn.close()
 
-    user = get_user_by_username(username)
-    return render_template("index.html", user=user, pw_success="密码修改成功")
+    return redirect(f"/profile")
 
 
 @app.route("/profile")
@@ -348,6 +354,115 @@ def request_entity_too_large(error):
 def logout():
     session.clear()
     return redirect("/")
+
+
+PAGES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pages")
+PAGE_ALLOWLIST = {"help", "about", "terms", "privacy"}
+
+
+@app.route("/page")
+def page():
+    name = request.args.get("name", "")
+    page_content = None
+
+    if name:
+        # 白名单校验：只允许加载预设的页面
+        clean_name = os.path.normpath(name).lstrip("/")
+        if clean_name not in PAGE_ALLOWLIST:
+            page_content = "页面不存在"
+        else:
+            filepath = os.path.join(PAGES_DIR, clean_name + ".html")
+            try:
+                # 安全校验：确认文件在 pages 目录内
+                real_path = os.path.realpath(filepath)
+                if not real_path.startswith(os.path.realpath(PAGES_DIR) + os.sep):
+                    page_content = "页面不存在"
+                elif os.path.isfile(real_path):
+                    with open(real_path, "r", encoding="utf-8") as f:
+                        page_content = f.read()
+                else:
+                    page_content = "页面不存在"
+            except (OSError, ValueError):
+                page_content = "页面不存在"
+
+    username = session.get("username")
+    user = get_user_by_username(username) if username else None
+    return render_template("index.html", user=user, page_content=page_content)
+
+
+@app.route("/fetch-url", methods=["POST"])
+def fetch_url():
+    username = session.get("username")
+    if not username:
+        return redirect("/login")
+
+    url = request.form.get("url", "")
+    status_code = None
+    content_preview = None
+    error_msg = None
+
+    if url:
+        # SSRF 防护1：只允许 http/https 协议
+        if not url.startswith(("http://", "https://")):
+            error_msg = "只允许访问 http:// 和 https:// 协议的 URL"
+        else:
+            try:
+                parsed = urlparse(url)
+                hostname = parsed.hostname
+
+                # SSRF 防护2：解析域名并检查是否为内网地址
+                try:
+                    addr = ip_address(hostname)
+                except ValueError:
+                    # 域名而非 IP，需要解析
+                    try:
+                        addr = ip_address(socket.gethostbyname(hostname))
+                    except socket.gaierror:
+                        error_msg = f"无法解析域名: {hostname}"
+
+                if not error_msg:
+                    # SSRF 防护3：禁止内网/私有地址
+                    private_networks = [
+                        ip_network("127.0.0.0/8"),      # 本地回环
+                        ip_network("10.0.0.0/8"),       # A 类私有
+                        ip_network("172.16.0.0/12"),    # B 类私有
+                        ip_network("192.168.0.0/16"),   # C 类私有
+                        ip_network("169.254.0.0/16"),   # 链路本地(含云元数据)
+                        ip_network("0.0.0.0/8"),        # 零地址
+                        ip_network("::1/128"),          # IPv6 回环
+                        ip_network("fc00::/7"),         # IPv6 唯一本地
+                    ]
+                    if any(addr in net for net in private_networks):
+                        error_msg = "禁止访问内网或保留地址"
+
+            except Exception as e:
+                error_msg = f"URL 校验失败: {str(e)}"
+
+        # 校验通过后执行抓取
+        if not error_msg and url:
+            try:
+                req = urllib.request.Request(
+                    url,
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; Bot)"}
+                )
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    status_code = response.status
+                    raw = response.read()
+                    content_preview = raw.decode("utf-8", errors="replace")[:5000]
+            except urllib.error.HTTPError as e:
+                status_code = e.code
+                content_preview = str(e)
+            except urllib.error.URLError as e:
+                error_msg = f"URL 访问失败: {e.reason}"
+            except Exception as e:
+                error_msg = f"发生错误: {str(e)}"
+
+    user = get_user_by_username(username)
+    return render_template("index.html", user=user,
+                           fetch_status=status_code,
+                           fetch_content=content_preview,
+                           fetch_error=error_msg,
+                           fetch_url=url)
 
 
 if __name__ == "__main__":

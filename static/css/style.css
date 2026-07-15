@@ -258,6 +258,38 @@ a {
     background: #f5f7fb;
 }
 
+/* 动态页面内容 */
+.page-content {
+    font-size: 15px;
+    line-height: 1.8;
+}
+
+.page-content h1 {
+    font-size: 24px;
+    margin-bottom: 16px;
+    color: #333;
+}
+
+.page-content h2 {
+    font-size: 18px;
+    margin: 20px 0 10px;
+    color: #444;
+}
+
+.page-content p {
+    margin-bottom: 12px;
+    color: #555;
+}
+
+.page-content ul {
+    margin: 8px 0 16px 20px;
+    color: #555;
+}
+
+.page-content li {
+    margin-bottom: 6px;
+}
+
 /* 表单底部链接 */
 .form-footer {
     text-align: center;
@@ -273,4 +305,49 @@ a {
 
 .form-footer a:hover {
     text-decoration: underline;
+}
+
+/* URL 抓取结果 */
+.fetch-result {
+    margin-top: 20px;
+}
+
+.fetch-result h4 {
+    margin-bottom: 12px;
+    color: #555;
+}
+
+.fetch-result p {
+    margin-bottom: 6px;
+    font-size: 14px;
+    color: #555;
+}
+
+.status-badge {
+    display: inline-block;
+    background: #667eea;
+    color: #fff;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.fetch-content {
+    margin-top: 10px;
+    background: #f8f9fc;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 14px;
+    max-height: 300px;
+    overflow: auto;
+}
+
+.fetch-content pre {
+    font-size: 12px;
+    line-height: 1.5;
+    color: #333;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-family: "Courier New", monospace;
 }
